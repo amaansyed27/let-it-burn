@@ -21,7 +21,7 @@ type Scene = {
 };
 
 const DURATION: Record<Ritual, number> = {
-  burn: 6800,
+  burn: 9000,
   shatter: 3500,
   shred: 4700,
   dissolve: 5400,
@@ -124,91 +124,464 @@ function drawArtifact(scene: Scene, alpha = 1) {
   context.restore();
 }
 
-function drawBurn(scene: Scene, progress: number, elapsed: number) {
-  const { context, texture, centerX, centerY, imageWidth, imageHeight } = scene;
-  const x = centerX - imageWidth / 2;
-  const y = centerY - imageHeight / 2;
-  const burn = clamp((progress - 0.04) / 0.89);
-  const remaining = imageHeight * (1 - burn);
-  const sourceHeight = texture.height * (1 - burn);
-  const edgeY = y + remaining;
+type BurnPoint = {
+  x: number;
+  y: number;
+};
 
-  if (remaining > 1) {
-    context.save();
-    context.shadowColor = "rgba(0, 0, 0, 0.62)";
-    context.shadowBlur = 38;
-    context.shadowOffsetY = 20;
+const burnSurfaces = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
+
+function getBurnSurface(
+  texture: HTMLCanvasElement,
+  width: number,
+  height: number,
+) {
+  let surface = burnSurfaces.get(texture);
+  if (!surface) {
+    surface = document.createElement("canvas");
+    burnSurfaces.set(texture, surface);
+  }
+  const nextWidth = Math.max(1, Math.round(width));
+  const nextHeight = Math.max(1, Math.round(height));
+  if (surface.width !== nextWidth || surface.height !== nextHeight) {
+    surface.width = nextWidth;
+    surface.height = nextHeight;
+  }
+  return surface;
+}
+
+function buildBurnFront(
+  width: number,
+  height: number,
+  burn: number,
+  elapsed: number,
+) {
+  const points: BurnPoint[] = [];
+  const samples = 48;
+  const base = height * (1 - burn);
+  const turbulence = Math.sin(clamp(burn) * Math.PI);
+
+  for (let index = 0; index <= samples; index += 1) {
+    const ratio = index / samples;
+    const wideWave = Math.sin(ratio * 15.4 + elapsed / 740) * 10;
+    const tightWave = Math.sin(ratio * 39.7 - elapsed / 410) * 4.5;
+    const grain = (random(index, 72) - 0.5) * 22;
+    points.push({
+      x: ratio * width,
+      y: clamp(
+        base + (wideWave + tightWave + grain) * (0.42 + turbulence * 0.58),
+        -16,
+        height + 18,
+      ),
+    });
+  }
+  return points;
+}
+
+function traceBurnFront(
+  context: CanvasRenderingContext2D,
+  points: BurnPoint[],
+) {
+  context.beginPath();
+  context.moveTo(points[0].x, points[0].y);
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const middleX = (previous.x + current.x) / 2;
+    const middleY = (previous.y + current.y) / 2;
+    context.quadraticCurveTo(previous.x, previous.y, middleX, middleY);
+  }
+  const last = points[points.length - 1];
+  context.lineTo(last.x, last.y);
+}
+
+function traceRemainingPaper(
+  context: CanvasRenderingContext2D,
+  points: BurnPoint[],
+  width: number,
+) {
+  context.beginPath();
+  context.moveTo(0, 0);
+  context.lineTo(width, 0);
+  for (let index = points.length - 1; index >= 0; index -= 1) {
+    context.lineTo(points[index].x, points[index].y);
+  }
+  context.closePath();
+}
+
+function drawBurnHole(
+  context: CanvasRenderingContext2D,
+  centerX: number,
+  centerY: number,
+  radius: number,
+  seed: number,
+) {
+  context.beginPath();
+  for (let point = 0; point <= 16; point += 1) {
+    const angle = (point / 16) * Math.PI * 2;
+    const wobble = 0.72 + random(seed * 20 + point, 73) * 0.42;
+    const x = centerX + Math.cos(angle) * radius * wobble;
+    const y = centerY + Math.sin(angle) * radius * wobble;
+    if (point === 0) context.moveTo(x, y);
+    else context.lineTo(x, y);
+  }
+  context.closePath();
+}
+
+function renderBurningPaper(
+  scene: Scene,
+  points: BurnPoint[],
+  burn: number,
+) {
+  const { texture, imageWidth, imageHeight } = scene;
+  const surface = getBurnSurface(texture, imageWidth, imageHeight);
+  const surfaceContext = surface.getContext("2d");
+  if (!surfaceContext) return surface;
+
+  surfaceContext.clearRect(0, 0, surface.width, surface.height);
+  surfaceContext.globalCompositeOperation = "source-over";
+  surfaceContext.filter = "none";
+  surfaceContext.drawImage(texture, 0, 0, imageWidth, imageHeight);
+
+  surfaceContext.globalCompositeOperation = "destination-in";
+  surfaceContext.fillStyle = "#fff";
+  traceRemainingPaper(surfaceContext, points, imageWidth);
+  surfaceContext.fill();
+
+  const averageEdge =
+    points.reduce((sum, point) => sum + point.y, 0) / points.length;
+  const charDepth = 82;
+  const char = surfaceContext.createLinearGradient(
+    0,
+    averageEdge - charDepth,
+    0,
+    averageEdge + 8,
+  );
+  char.addColorStop(0, "rgba(25, 20, 16, 0)");
+  char.addColorStop(0.34, "rgba(25, 17, 12, 0.16)");
+  char.addColorStop(0.68, "rgba(15, 9, 5, 0.7)");
+  char.addColorStop(0.88, "rgba(5, 3, 2, 0.98)");
+  char.addColorStop(1, "rgba(1, 1, 1, 1)");
+  surfaceContext.globalCompositeOperation = "source-atop";
+  surfaceContext.fillStyle = char;
+  surfaceContext.fillRect(
+    0,
+    averageEdge - charDepth,
+    imageWidth,
+    charDepth + 30,
+  );
+
+  for (let index = 0; index < 32; index += 1) {
+    const ignition = 0.08 + random(index, 74) * 0.78;
+    const life = clamp((burn - ignition) / 0.13);
+    if (life <= 0) continue;
+
+    const centerX = random(index, 75) * imageWidth;
+    const centerY =
+      imageHeight * (1 - ignition) -
+      8 -
+      random(index, 76) * Math.min(72, imageHeight * 0.12);
+    const outerRadius = (6 + random(index, 77) * 25) * easeOut(life);
+
+    surfaceContext.globalCompositeOperation = "source-atop";
+    surfaceContext.fillStyle = `rgba(8, 5, 3, ${0.82 * life})`;
+    drawBurnHole(
+      surfaceContext,
+      centerX,
+      centerY,
+      outerRadius + 7,
+      index,
+    );
+    surfaceContext.fill();
+
+    surfaceContext.globalCompositeOperation = "destination-out";
+    surfaceContext.fillStyle = "#000";
+    drawBurnHole(surfaceContext, centerX, centerY, outerRadius, index);
+    surfaceContext.fill();
+  }
+
+  surfaceContext.globalCompositeOperation = "source-over";
+  return surface;
+}
+
+function drawSmoke(
+  context: CanvasRenderingContext2D,
+  x: number,
+  points: BurnPoint[],
+  burn: number,
+  elapsed: number,
+) {
+  const amount = Math.sin(clamp(burn) * Math.PI * 0.88);
+  if (amount <= 0.02) return;
+
+  context.save();
+  context.filter = "blur(9px)";
+  for (let index = 0; index < 24; index += 1) {
+    const cycle =
+      (elapsed / (2500 + random(index, 81) * 1800) + random(index, 82)) % 1;
+    const point = points[Math.floor(random(index, 83) * (points.length - 1))];
+    const drift =
+      (random(index, 84) - 0.5) * 90 * cycle +
+      Math.sin(elapsed / 900 + index) * 15;
+    const radius = 9 + cycle * (32 + random(index, 85) * 34);
+    context.globalAlpha =
+      Math.sin(cycle * Math.PI) * (0.035 + random(index, 86) * 0.065) * amount;
+    context.fillStyle = index % 3 === 0 ? "#a37963" : "#77716c";
     context.beginPath();
-    context.moveTo(x, y);
-    context.lineTo(x + imageWidth, y);
-    for (let index = 12; index >= 0; index -= 1) {
-      const pointX = x + (imageWidth * index) / 12;
-      const jagged = (random(index, Math.floor(burn * 140)) - 0.5) * 26;
-      context.lineTo(pointX, edgeY + jagged);
-    }
+    context.ellipse(
+      x + point.x + drift,
+      point.y - cycle * (110 + random(index, 87) * 190),
+      radius * 0.8,
+      radius,
+      drift / 180,
+      0,
+      Math.PI * 2,
+    );
+    context.fill();
+  }
+  context.restore();
+}
+
+function drawFlames(
+  context: CanvasRenderingContext2D,
+  x: number,
+  points: BurnPoint[],
+  burn: number,
+  elapsed: number,
+) {
+  const strength = Math.sin(clamp(burn * 1.1) * Math.PI);
+  if (strength <= 0.02) return;
+
+  context.save();
+  context.globalCompositeOperation = "lighter";
+  for (let index = 0; index < 34; index += 1) {
+    const point = points[Math.floor(random(index, 90) * (points.length - 1))];
+    const cycle =
+      (elapsed / (520 + random(index, 91) * 720) + random(index, 92)) % 1;
+    const baseX = x + point.x + Math.sin(elapsed / 180 + index * 2.1) * 7;
+    const height = (24 + random(index, 93) * 102) * (1 - cycle * 0.48);
+    const width = 5 + random(index, 94) * 17;
+    const sway = Math.sin(elapsed / 260 + index * 1.7) * height * 0.18;
+    const alpha = Math.sin(cycle * Math.PI) * strength;
+
+    const flame = context.createLinearGradient(
+      0,
+      point.y,
+      0,
+      point.y - height,
+    );
+    flame.addColorStop(0, `rgba(255, 242, 176, ${0.78 * alpha})`);
+    flame.addColorStop(0.2, `rgba(255, 176, 53, ${0.68 * alpha})`);
+    flame.addColorStop(0.58, `rgba(246, 61, 11, ${0.42 * alpha})`);
+    flame.addColorStop(1, "rgba(115, 19, 4, 0)");
+    context.fillStyle = flame;
+    context.shadowColor = "rgba(255, 72, 15, 0.7)";
+    context.shadowBlur = 8 + width;
+    context.beginPath();
+    context.moveTo(baseX - width, point.y + 5);
+    context.bezierCurveTo(
+      baseX - width * 0.7,
+      point.y - height * 0.3,
+      baseX + sway - width * 0.15,
+      point.y - height * 0.78,
+      baseX + sway,
+      point.y - height,
+    );
+    context.bezierCurveTo(
+      baseX + sway + width * 0.2,
+      point.y - height * 0.55,
+      baseX + width * 0.8,
+      point.y - height * 0.24,
+      baseX + width,
+      point.y + 5,
+    );
     context.closePath();
-    context.clip();
+    context.fill();
+  }
+  context.restore();
+}
+
+function drawBurnEdge(
+  context: CanvasRenderingContext2D,
+  x: number,
+  points: BurnPoint[],
+  burn: number,
+) {
+  const strength = Math.sin(clamp(burn * 1.08) * Math.PI);
+  if (strength <= 0.02) return;
+  context.save();
+  context.translate(x, 0);
+  context.globalCompositeOperation = "lighter";
+
+  traceBurnFront(context, points);
+  context.strokeStyle = `rgba(130, 20, 4, ${0.48 * strength})`;
+  context.lineWidth = 17;
+  context.shadowColor = "rgba(255, 50, 9, 0.72)";
+  context.shadowBlur = 28;
+  context.stroke();
+
+  traceBurnFront(context, points);
+  context.strokeStyle = `rgba(255, 78, 14, ${0.78 * strength})`;
+  context.lineWidth = 5;
+  context.shadowBlur = 14;
+  context.stroke();
+
+  traceBurnFront(context, points);
+  context.strokeStyle = `rgba(255, 224, 127, ${0.9 * strength})`;
+  context.lineWidth = 1.2;
+  context.shadowBlur = 7;
+  context.stroke();
+  context.restore();
+}
+
+function drawAsh(
+  scene: Scene,
+  x: number,
+  points: BurnPoint[],
+  burn: number,
+  elapsed: number,
+) {
+  const { context, texture, centerX, centerY, imageWidth, imageHeight } = scene;
+  const floorY = centerY + imageHeight / 2 + Math.min(64, scene.height * 0.07);
+  const pile = easeOut(clamp((burn - 0.08) / 0.92));
+
+  context.save();
+  context.globalAlpha = pile * 0.8;
+  for (let index = 0; index < 74; index += 1) {
+    const spread = (random(index, 101) - 0.5) * imageWidth * 0.78 * pile;
+    const layer = random(index, 102);
+    const size = 1 + random(index, 103) * 5;
+    context.fillStyle =
+      index % 5 === 0
+        ? "rgba(75, 61, 51, 0.72)"
+        : "rgba(38, 34, 31, 0.82)";
+    context.beginPath();
+    context.ellipse(
+      centerX + spread,
+      floorY - layer * 9 * pile,
+      size * 1.7,
+      size * 0.52,
+      random(index, 104) * Math.PI,
+      0,
+      Math.PI * 2,
+    );
+    context.fill();
+  }
+  context.restore();
+
+  for (let index = 0; index < 96; index += 1) {
+    const delay = 0.04 + random(index, 105) * 0.86;
+    const life = clamp((burn - delay) / (0.13 + random(index, 106) * 0.12));
+    if (life <= 0 || life >= 1) continue;
+    const point = points[Math.floor(random(index, 107) * (points.length - 1))];
+    const startX = x + point.x;
+    const drift =
+      (random(index, 108) - 0.5) * (70 + life * 130) +
+      Math.sin(elapsed / 310 + index) * 10;
+    const y = point.y + life * life * (80 + random(index, 109) * 280);
+    const size = 3 + random(index, 110) * 9;
+
+    context.save();
+    context.globalAlpha = Math.sin(life * Math.PI) * 0.84;
+    context.translate(startX + drift, y);
+    context.rotate((random(index, 111) - 0.5) * life * 9);
+    context.filter = "grayscale(1) brightness(0.25)";
+    const sourceX = random(index, 112) * (texture.width - 24);
+    const sourceY = random(index, 113) * (texture.height - 24);
     context.drawImage(
       texture,
-      0,
-      0,
-      texture.width,
-      Math.max(1, sourceHeight),
-      x,
-      y,
-      imageWidth,
-      Math.max(1, remaining),
+      sourceX,
+      sourceY,
+      24,
+      24,
+      -size / 2,
+      -size / 2,
+      size,
+      size * (0.35 + random(index, 114) * 0.6),
     );
+    context.restore();
+  }
+}
 
-    const char = context.createLinearGradient(0, edgeY - 54, 0, edgeY + 10);
-    char.addColorStop(0, "rgba(16, 11, 7, 0)");
-    char.addColorStop(0.45, "rgba(20, 10, 5, 0.42)");
-    char.addColorStop(0.76, "rgba(14, 6, 3, 0.94)");
-    char.addColorStop(0.9, "rgba(240, 69, 19, 0.9)");
-    char.addColorStop(1, "rgba(255, 184, 66, 0)");
-    context.fillStyle = char;
-    context.fillRect(x - 8, edgeY - 62, imageWidth + 16, 80);
+function drawSparks(
+  context: CanvasRenderingContext2D,
+  x: number,
+  points: BurnPoint[],
+  burn: number,
+  elapsed: number,
+) {
+  for (let index = 0; index < 74; index += 1) {
+    const delay = random(index, 120) * 0.82;
+    const life = clamp((burn - delay) / 0.22);
+    if (life <= 0 || life >= 1) continue;
+    const point = points[Math.floor(random(index, 121) * (points.length - 1))];
+    const sparkX =
+      x +
+      point.x +
+      (random(index, 122) - 0.5) * 80 * life +
+      Math.sin(elapsed / 220 + index) * 13;
+    const sparkY = point.y - life * (90 + random(index, 123) * 240);
+    const alpha = Math.sin(life * Math.PI);
+    context.fillStyle = `rgba(255, ${
+      110 + Math.round(random(index, 124) * 110)
+    }, 38, ${alpha})`;
+    context.beginPath();
+    context.arc(sparkX, sparkY, 0.7 + random(index, 125) * 1.8, 0, Math.PI * 2);
+    context.fill();
+  }
+}
+
+function drawBurn(scene: Scene, progress: number, elapsed: number) {
+  const { context, centerX, centerY, imageWidth, imageHeight } = scene;
+  const x = centerX - imageWidth / 2;
+  const y = centerY - imageHeight / 2;
+  const burn = clamp((progress - 0.035) / 0.84);
+  const localPoints = buildBurnFront(imageWidth, imageHeight, burn, elapsed);
+  const worldPoints = localPoints.map((point) => ({
+    x: point.x,
+    y: y + point.y,
+  }));
+  const fireStrength = Math.sin(clamp(burn * 1.08) * Math.PI);
+
+  drawSmoke(context, x, worldPoints, burn, elapsed);
+
+  if (burn < 1) {
+    const burningPaper = renderBurningPaper(scene, localPoints, burn);
+    context.save();
+    context.shadowColor = "rgba(0, 0, 0, 0.78)";
+    context.shadowBlur = 42;
+    context.shadowOffsetY = 26;
+    context.drawImage(burningPaper, x, y, imageWidth, imageHeight);
     context.restore();
   }
 
-  const sparkCount = 95;
-  for (let index = 0; index < sparkCount; index += 1) {
-    const delay = random(index, 20) * 0.72;
-    const life = clamp((burn - delay) / 0.28);
-    if (life <= 0 || life >= 1) continue;
-    const startX = x + random(index, 21) * imageWidth;
-    const wave = Math.sin(elapsed / 280 + index) * 16;
-    const sparkX = startX + (random(index, 22) - 0.5) * 90 * life + wave * life;
-    const sparkY = edgeY - life * (90 + random(index, 23) * 230);
-    const alpha = Math.sin(life * Math.PI);
-    context.fillStyle = `rgba(255, ${
-      90 + Math.round(random(index, 24) * 100)
-    }, 34, ${alpha})`;
-    context.beginPath();
-    context.arc(sparkX, sparkY, 0.8 + random(index, 25) * 2, 0, Math.PI * 2);
-    context.fill();
-  }
-
-  const flameStrength = Math.sin(clamp(burn * 1.4) * Math.PI);
-  if (flameStrength > 0.03) {
-    const fireGlow = context.createRadialGradient(
+  if (fireStrength > 0.02) {
+    const averageEdge =
+      worldPoints.reduce((sum, point) => sum + point.y, 0) / worldPoints.length;
+    const glow = context.createRadialGradient(
       centerX,
-      edgeY,
+      averageEdge,
       0,
       centerX,
-      edgeY,
-      imageWidth * 0.65,
+      averageEdge,
+      imageWidth * 0.64,
     );
-    fireGlow.addColorStop(0, `rgba(255, 71, 18, ${0.2 * flameStrength})`);
-    fireGlow.addColorStop(1, "rgba(255, 50, 0, 0)");
-    context.fillStyle = fireGlow;
+    glow.addColorStop(0, `rgba(255, 68, 12, ${0.23 * fireStrength})`);
+    glow.addColorStop(0.42, `rgba(157, 32, 5, ${0.1 * fireStrength})`);
+    glow.addColorStop(1, "rgba(70, 12, 2, 0)");
+    context.fillStyle = glow;
     context.fillRect(
-      x - imageWidth * 0.2,
-      edgeY - imageHeight * 0.4,
-      imageWidth * 1.4,
-      imageHeight * 0.8,
+      x - imageWidth * 0.18,
+      averageEdge - imageHeight * 0.46,
+      imageWidth * 1.36,
+      imageHeight * 0.92,
     );
   }
+
+  drawFlames(context, x, worldPoints, burn, elapsed);
+  drawBurnEdge(context, x, worldPoints, burn);
+  drawSparks(context, x, worldPoints, burn, elapsed);
+  drawAsh(scene, x, worldPoints, burn, elapsed);
 }
 
 function drawCracks(scene: Scene, strength: number) {
