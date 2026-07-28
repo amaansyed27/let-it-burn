@@ -29,3 +29,10 @@ jobs:
 
       - name: Build production bundle
         run: npm run build
+
+      - name: Upload browser preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-preview
+          path: dist
+          retention-days: 2

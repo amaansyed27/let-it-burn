@@ -163,13 +163,23 @@ function buildBurnFront(
 
   for (let index = 0; index <= samples; index += 1) {
     const ratio = index / samples;
-    const wideWave = Math.sin(ratio * 15.4 + elapsed / 740) * 10;
-    const tightWave = Math.sin(ratio * 39.7 - elapsed / 410) * 4.5;
-    const grain = (random(index, 72) - 0.5) * 22;
+    const wideWave = Math.sin(ratio * 14.2 + elapsed / 1180) * 7;
+    const tightWave = Math.sin(ratio * 41.7 - elapsed / 760) * 3.5;
+    const grain = (random(index, 72) - 0.5) * 18;
+    let burntBites = 0;
+    for (let notch = 0; notch < 7; notch += 1) {
+      const notchCenter = random(notch, 126);
+      const notchWidth = 0.018 + random(notch, 127) * 0.052;
+      const distance = (ratio - notchCenter) / notchWidth;
+      burntBites -=
+        Math.exp(-(distance * distance)) * (9 + random(notch, 128) * 28);
+    }
     points.push({
       x: ratio * width,
       y: clamp(
-        base + (wideWave + tightWave + grain) * (0.42 + turbulence * 0.58),
+        base +
+          (wideWave + tightWave + grain + burntBites) *
+            (0.42 + turbulence * 0.58),
         -16,
         height + 18,
       ),
@@ -248,28 +258,41 @@ function renderBurningPaper(
   traceRemainingPaper(surfaceContext, points, imageWidth);
   surfaceContext.fill();
 
-  const averageEdge =
-    points.reduce((sum, point) => sum + point.y, 0) / points.length;
-  const charDepth = 82;
-  const char = surfaceContext.createLinearGradient(
-    0,
-    averageEdge - charDepth,
-    0,
-    averageEdge + 8,
-  );
-  char.addColorStop(0, "rgba(25, 20, 16, 0)");
-  char.addColorStop(0.34, "rgba(25, 17, 12, 0.16)");
-  char.addColorStop(0.68, "rgba(15, 9, 5, 0.7)");
-  char.addColorStop(0.88, "rgba(5, 3, 2, 0.98)");
-  char.addColorStop(1, "rgba(1, 1, 1, 1)");
   surfaceContext.globalCompositeOperation = "source-atop";
-  surfaceContext.fillStyle = char;
-  surfaceContext.fillRect(
-    0,
-    averageEdge - charDepth,
-    imageWidth,
-    charDepth + 30,
-  );
+  surfaceContext.save();
+  surfaceContext.filter = "blur(8px)";
+  traceBurnFront(surfaceContext, points);
+  surfaceContext.strokeStyle = "rgba(62, 37, 23, 0.42)";
+  surfaceContext.lineWidth = 34;
+  surfaceContext.stroke();
+  surfaceContext.restore();
+
+  traceBurnFront(surfaceContext, points);
+  surfaceContext.strokeStyle = "rgba(35, 18, 9, 0.78)";
+  surfaceContext.lineWidth = 18;
+  surfaceContext.stroke();
+
+  traceBurnFront(surfaceContext, points);
+  surfaceContext.strokeStyle = "rgba(6, 4, 3, 0.98)";
+  surfaceContext.lineWidth = 7;
+  surfaceContext.stroke();
+
+  for (let index = 0; index < 70; index += 1) {
+    const point = points[Math.floor(random(index, 129) * (points.length - 1))];
+    const size = 0.8 + random(index, 130) * 3.2;
+    surfaceContext.fillStyle = `rgba(28, 13, 7, ${
+      0.08 + random(index, 131) * 0.24
+    })`;
+    surfaceContext.beginPath();
+    surfaceContext.arc(
+      point.x + (random(index, 132) - 0.5) * 24,
+      point.y - 5 - random(index, 133) * 25,
+      size,
+      0,
+      Math.PI * 2,
+    );
+    surfaceContext.fill();
+  }
 
   for (let index = 0; index < 32; index += 1) {
     const ignition = 0.08 + random(index, 74) * 0.78;
@@ -354,14 +377,14 @@ function drawFlames(
 
   context.save();
   context.globalCompositeOperation = "lighter";
-  for (let index = 0; index < 34; index += 1) {
+  for (let index = 0; index < 42; index += 1) {
     const point = points[Math.floor(random(index, 90) * (points.length - 1))];
     const cycle =
-      (elapsed / (520 + random(index, 91) * 720) + random(index, 92)) % 1;
-    const baseX = x + point.x + Math.sin(elapsed / 180 + index * 2.1) * 7;
-    const height = (24 + random(index, 93) * 102) * (1 - cycle * 0.48);
-    const width = 5 + random(index, 94) * 17;
-    const sway = Math.sin(elapsed / 260 + index * 1.7) * height * 0.18;
+      (elapsed / (360 + random(index, 91) * 520) + random(index, 92)) % 1;
+    const baseX = x + point.x + Math.sin(elapsed / 230 + index * 2.1) * 3.5;
+    const height = (7 + random(index, 93) * 34) * (1 - cycle * 0.42);
+    const width = 2 + random(index, 94) * 7;
+    const sway = Math.sin(elapsed / 320 + index * 1.7) * height * 0.3;
     const alpha = Math.sin(cycle * Math.PI) * strength;
 
     const flame = context.createLinearGradient(
@@ -370,28 +393,28 @@ function drawFlames(
       0,
       point.y - height,
     );
-    flame.addColorStop(0, `rgba(255, 242, 176, ${0.78 * alpha})`);
-    flame.addColorStop(0.2, `rgba(255, 176, 53, ${0.68 * alpha})`);
-    flame.addColorStop(0.58, `rgba(246, 61, 11, ${0.42 * alpha})`);
-    flame.addColorStop(1, "rgba(115, 19, 4, 0)");
+    flame.addColorStop(0, `rgba(255, 146, 62, ${0.88 * alpha})`);
+    flame.addColorStop(0.24, `rgba(255, 76, 22, ${0.76 * alpha})`);
+    flame.addColorStop(0.65, `rgba(205, 30, 9, ${0.46 * alpha})`);
+    flame.addColorStop(1, "rgba(92, 10, 3, 0)");
     context.fillStyle = flame;
-    context.shadowColor = "rgba(255, 72, 15, 0.7)";
-    context.shadowBlur = 8 + width;
+    context.shadowColor = "rgba(255, 53, 12, 0.76)";
+    context.shadowBlur = 5 + width;
     context.beginPath();
     context.moveTo(baseX - width, point.y + 5);
     context.bezierCurveTo(
-      baseX - width * 0.7,
-      point.y - height * 0.3,
-      baseX + sway - width * 0.15,
-      point.y - height * 0.78,
+      baseX - width * 0.5,
+      point.y - height * 0.26,
+      baseX + sway - width * 0.12,
+      point.y - height * 0.72,
       baseX + sway,
       point.y - height,
     );
     context.bezierCurveTo(
-      baseX + sway + width * 0.2,
-      point.y - height * 0.55,
-      baseX + width * 0.8,
-      point.y - height * 0.24,
+      baseX + sway + width * 0.35,
+      point.y - height * 0.56,
+      baseX + width * 0.62,
+      point.y - height * 0.22,
       baseX + width,
       point.y + 5,
     );
@@ -414,22 +437,22 @@ function drawBurnEdge(
   context.globalCompositeOperation = "lighter";
 
   traceBurnFront(context, points);
-  context.strokeStyle = `rgba(130, 20, 4, ${0.48 * strength})`;
-  context.lineWidth = 17;
-  context.shadowColor = "rgba(255, 50, 9, 0.72)";
-  context.shadowBlur = 28;
+  context.strokeStyle = `rgba(117, 14, 4, ${0.52 * strength})`;
+  context.lineWidth = 8;
+  context.shadowColor = "rgba(255, 43, 8, 0.7)";
+  context.shadowBlur = 17;
   context.stroke();
 
   traceBurnFront(context, points);
-  context.strokeStyle = `rgba(255, 78, 14, ${0.78 * strength})`;
-  context.lineWidth = 5;
-  context.shadowBlur = 14;
+  context.strokeStyle = `rgba(255, 68, 18, ${0.82 * strength})`;
+  context.lineWidth = 2.8;
+  context.shadowBlur = 9;
   context.stroke();
 
   traceBurnFront(context, points);
-  context.strokeStyle = `rgba(255, 224, 127, ${0.9 * strength})`;
-  context.lineWidth = 1.2;
-  context.shadowBlur = 7;
+  context.strokeStyle = `rgba(255, 143, 67, ${0.88 * strength})`;
+  context.lineWidth = 0.8;
+  context.shadowBlur = 4;
   context.stroke();
   context.restore();
 }
