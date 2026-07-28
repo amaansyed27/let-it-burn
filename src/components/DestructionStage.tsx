@@ -532,7 +532,7 @@ function drawSparks(
 }
 
 function drawBurn(scene: Scene, progress: number, elapsed: number) {
-  const { context, texture, centerX, centerY, imageWidth, imageHeight } = scene;
+  const { context, centerX, centerY, imageWidth, imageHeight } = scene;
   const x = centerX - imageWidth / 2;
   const y = centerY - imageHeight / 2;
   const burn = clamp((progress - 0.035) / 0.84);
